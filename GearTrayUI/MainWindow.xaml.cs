@@ -127,6 +127,7 @@ public partial class MainWindow : Window
         {
             ShowOfflineCheckbox.IsChecked = App.Coordinator.ShowOfflineDevices;
             AutoSwitchCheckbox.IsChecked = App.Coordinator.AutoSwitchHeadphones;
+            AutoSwitchMicCheckbox.IsChecked = App.Coordinator.AutoSwitchMicrophone;
             PauseFullScreenCheckbox.IsChecked = App.Coordinator.PauseNotificationOnFullScreen;
         }
 
@@ -210,6 +211,14 @@ public partial class MainWindow : Window
         if (App.Coordinator != null && AutoSwitchCheckbox.IsChecked.HasValue)
         {
             App.Coordinator.AutoSwitchHeadphones = AutoSwitchCheckbox.IsChecked.Value;
+        }
+    }
+
+    private void AutoSwitchMic_Changed(object sender, RoutedEventArgs e)
+    {
+        if (App.Coordinator != null && AutoSwitchMicCheckbox.IsChecked.HasValue)
+        {
+            App.Coordinator.AutoSwitchMicrophone = AutoSwitchMicCheckbox.IsChecked.Value;
         }
     }
 

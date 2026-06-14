@@ -275,6 +275,10 @@
                                           Foreground="{DynamicResource TextBrush}" FontSize="13" Margin="0,16,0,0"
                                           Checked="AutoSwitch_Changed" Unchecked="AutoSwitch_Changed"/>
 
+                                <CheckBox x:Name="AutoSwitchMicCheckbox" Content="Automatically switch input/microphone to headset when connected" 
+                                          Foreground="{DynamicResource TextBrush}" FontSize="13" Margin="0,16,0,0"
+                                          Checked="AutoSwitchMic_Changed" Unchecked="AutoSwitchMic_Changed"/>
+
                                 <CheckBox x:Name="PauseFullScreenCheckbox" Content="Pause battery notifications for full screen apps" 
                                           Foreground="{DynamicResource TextBrush}" FontSize="13" Margin="0,16,0,0"
                                           Checked="PauseFullScreen_Changed" Unchecked="PauseFullScreen_Changed"/>

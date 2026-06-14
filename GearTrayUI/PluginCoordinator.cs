@@ -22,6 +22,8 @@ public class AppConfig
     public bool ShowOfflineDevices { get; set; } = true;
     public bool AutoSwitchHeadphones { get; set; } = false;
     public string PreviousDefaultDeviceId { get; set; } = string.Empty;
+    public bool AutoSwitchMicrophone { get; set; } = false;
+    public string PreviousDefaultCaptureDeviceId { get; set; } = string.Empty;
     public List<DeviceCacheInfo> CachedDevices { get; set; } = [];
     public int GlobalBatteryThreshold { get; set; } = 15;
     public bool EnableNotifications { get; set; } = true;
@@ -114,6 +116,19 @@ public class PluginCoordinator
             if (_config.AutoSwitchHeadphones != value)
             {
                 _config.AutoSwitchHeadphones = value;
+                SaveConfig(_config);
+            }
+        }
+    }
+
+    public bool AutoSwitchMicrophone
+    {
+        get => _config.AutoSwitchMicrophone;
+        set
+        {
+            if (_config.AutoSwitchMicrophone != value)
+            {
+                _config.AutoSwitchMicrophone = value;
                 SaveConfig(_config);
             }
         }
@@ -453,6 +468,35 @@ public class PluginCoordinator
                     activateControl.OnControlChanged?.Invoke(1.0);
                 }
             }
+
+            // Auto-switch default capture input to headset microphone if enabled
+            if (_config.AutoSwitchMicrophone && status.Type == DeviceType.Headset && !wasOnline)
+            {
+                var audioPlugin = _plugins.OfType<GearTray.Plugins.Audio.AudioPlugin>().FirstOrDefault();
+                if (audioPlugin != null)
+                {
+                    string? currentMic = audioPlugin.GetDefaultCaptureDeviceId();
+                    if (currentMic != null)
+                    {
+                        _config.PreviousDefaultCaptureDeviceId = currentMic;
+                        SaveConfig(_config);
+                    }
+
+                    // Extract core model name from display name (e.g. "Arctis Nova 7X")
+                    string cleanModel = status.DisplayName
+                        .Replace("Headphones", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("Headset", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("Wireless", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("(", "").Replace(")", "").Trim();
+
+                    string? headsetMicId = audioPlugin.FindCaptureDeviceIdByName(cleanModel);
+                    if (headsetMicId != null)
+                    {
+                        GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", $"AutoSwitch: Automatically selected microphone for '{status.DisplayName}' as default recording device", "#8A2BE2");
+                        audioPlugin.SetDefaultCaptureDevice(headsetMicId);
+                    }
+                }
+            }
         }
         else
         {
@@ -470,6 +514,20 @@ public class PluginCoordinator
                             GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", $"AutoSwitch: Restoring previous audio device '{prevDev.DisplayName}'", "#8A2BE2");
                             activateControl.OnControlChanged?.Invoke(1.0);
                         }
+                    }
+                }
+            }
+
+            // Auto-restore previous capture input when headphones go offline
+            if (_config.AutoSwitchMicrophone && status.Type == DeviceType.Headset && wasOnline)
+            {
+                if (!string.IsNullOrEmpty(_config.PreviousDefaultCaptureDeviceId))
+                {
+                    var audioPlugin = _plugins.OfType<GearTray.Plugins.Audio.AudioPlugin>().FirstOrDefault();
+                    if (audioPlugin != null)
+                    {
+                        GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", "AutoSwitch: Headset went offline, restoring previous recording device", "#8A2BE2");
+                        audioPlugin.SetDefaultCaptureDevice(_config.PreviousDefaultCaptureDeviceId);
                     }
                 }
             }

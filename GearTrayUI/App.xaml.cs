@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using GearTray.Contracts;
 using GearTray.Plugins.Audio;
 using GearTray.Plugins.Logitech;
+using GearTray.Plugins.Razer;
 
 namespace GearTrayUI;
 
@@ -25,6 +26,7 @@ public partial class App : Application
             // Register device plugins
             services.AddSingleton<IDevicePlugin, AudioPlugin>();
             services.AddSingleton<IDevicePlugin, LogitechPlugin>();
+            services.AddSingleton<IDevicePlugin, RazerPlugin>();
             
             // Register a coordinator service that manages loaded plugins
             services.AddSingleton<PluginCoordinator>();

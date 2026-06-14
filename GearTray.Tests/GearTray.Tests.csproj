@@ -22,6 +22,7 @@
     <ProjectReference Include="..\GearTray.Plugins.Logitech\GearTray.Plugins.Logitech.csproj" />
     <ProjectReference Include="..\GearTray.Plugins.Audio\GearTray.Plugins.Audio.csproj" />
     <ProjectReference Include="..\GearTrayUI\GearTrayUI.csproj" />
+    <ProjectReference Include="..\GearTray.Plugins.Razer\GearTray.Plugins.Razer.csproj" />
   </ItemGroup>
 
   <ItemGroup>

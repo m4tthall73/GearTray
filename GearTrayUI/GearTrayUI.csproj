@@ -13,6 +13,7 @@
     <ProjectReference Include="..\GearTray.Contracts\GearTray.Contracts.csproj" />
     <ProjectReference Include="..\GearTray.Plugins.Audio\GearTray.Plugins.Audio.csproj" />
     <ProjectReference Include="..\GearTray.Plugins.Logitech\GearTray.Plugins.Logitech.csproj" />
+    <ProjectReference Include="..\GearTray.Plugins.Razer\GearTray.Plugins.Razer.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />

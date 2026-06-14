@@ -48,10 +48,12 @@ namespace GearTray.Tests
             coordinator.Initialize();
             Assert.True(coordinator.ShowOfflineDevices);
             Assert.Equal(15, coordinator.GlobalBatteryThreshold);
+            Assert.False(coordinator.AutoSwitchMicrophone);
 
             // Change values and save
             coordinator.ShowOfflineDevices = false;
             coordinator.GlobalBatteryThreshold = 25;
+            coordinator.AutoSwitchMicrophone = true;
             coordinator.Shutdown();
 
             // Assert file exists
@@ -62,6 +64,7 @@ namespace GearTray.Tests
             newCoordinator.Initialize();
             Assert.False(newCoordinator.ShowOfflineDevices);
             Assert.Equal(25, newCoordinator.GlobalBatteryThreshold);
+            Assert.True(newCoordinator.AutoSwitchMicrophone);
             newCoordinator.Shutdown();
         }
 

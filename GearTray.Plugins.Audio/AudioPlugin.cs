@@ -482,6 +482,57 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
 
+    public string? FindCaptureDeviceIdByName(string nameSubstring)
+    {
+        try
+        {
+            var enumerator = new MMDeviceEnumerator();
+            var endpoints = enumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active);
+            var match = endpoints.FirstOrDefault(e => e.FriendlyName.Contains(nameSubstring, StringComparison.OrdinalIgnoreCase));
+            return match?.ID;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error finding capture device by name '{nameSubstring}': {ex.Message}");
+            return null;
+        }
+    }
+
+    public string? GetDefaultCaptureDeviceId()
+    {
+        try
+        {
+            var enumerator = new MMDeviceEnumerator();
+            var dev = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+            return dev?.ID;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error getting default capture device ID: {ex.Message}");
+            return null;
+        }
+    }
+
+    public void SetDefaultCaptureDevice(string deviceId)
+    {
+        try
+        {
+            EventLogger.Log("AUDIO_SWITCH", $"Setting default capture/recording device to ID={deviceId}", "#8A2BE2");
+            var policyConfig = (IPolicyConfig)new _CPolicyConfigClient();
+            int hr = policyConfig.SetDefaultEndpoint(deviceId, (uint)ERole.eConsole);
+            EventLogger.Log("AUDIO_SWITCH", $"SetDefaultCaptureEndpoint (Console) returned: 0x{hr:X}", "#8A2BE2");
+            hr = policyConfig.SetDefaultEndpoint(deviceId, (uint)ERole.eMultimedia);
+            EventLogger.Log("AUDIO_SWITCH", $"SetDefaultCaptureEndpoint (Multimedia) returned: 0x{hr:X}", "#8A2BE2");
+            hr = policyConfig.SetDefaultEndpoint(deviceId, (uint)ERole.eCommunications);
+            EventLogger.Log("AUDIO_SWITCH", $"SetDefaultCaptureEndpoint (Communications) returned: 0x{hr:X}", "#8A2BE2");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error setting default capture device: {ex.Message}");
+            EventLogger.Log("SYSTEM", $"Failed to set default capture device: {ex.Message}", "#C62828");
+        }
+    }
+
     private void TriggerStatusChanged()
     {
         foreach (var device in GetActiveDevices())
