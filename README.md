@@ -55,6 +55,7 @@ The core architectural philosophy of GearTray is strict decoupling. The UI does 
 - [GearTray.Contracts](file:///d:/Projects/GearTray/GearTray.Contracts): Interface definitions and shared schemas.
 - [GearTray.Plugins.Audio](file:///d:/Projects/GearTray/GearTray.Plugins.Audio): Interfaces with Windows WASAPI via NAudio to manage default audio endpoints, master volume, and mute states.
 - [GearTray.Plugins.Logitech](file:///d:/Projects/GearTray/GearTray.Plugins.Logitech): Enumerates USB receivers and queries Logitech keyboards, mice, and headsets directly via HID++ protocol commands over `hidapi.dll`.
+- [GearTray.Plugins.Razer](file:///d:/Projects/GearTray/GearTray.Plugins.Razer): Interfaces with Razer microphones (like Seiren) using WASAPI/NAudio to query and control mute status and gain level, subscribing to volume notifications for hardware state synchronization.
 - [GearTrayUI](file:///d:/Projects/GearTray/GearTrayUI): The WPF user interface. Coordinates registered plugins via `PluginCoordinator`, instantiates the Hardcodet `TaskbarIcon`, and renders the dynamic system tray context menu.
 - [GearTray.Tests](file:///d:/Projects/GearTray/GearTray.Tests): The xUnit & Moq testing suite that validates event logs, state transitions, config loading/saving, and battery alerts.
 
@@ -85,6 +86,7 @@ This will run all xUnit test classes validating:
 * `EventLogger` reverse chronological buffering, bounds limits (500 entries), and auto-detecting categories/colors.
 * `LogitechPlugin` status event deduplication and online-offline state recovery.
 * `PluginCoordinator` settings persistence, custom device names, and battery alert threshold checks.
+* `RazerPlugin` device detection filtering, controls mapping, and volume/mute deduplication.
 
 ---
 
@@ -102,7 +104,6 @@ We want to thank the developers of the original applications and libraries that 
 
 Future developers or agents should focus on the following items to extend the utility:
 1. **Additional Device Plugins**: 
-   - **Razer Mic Plugin**: Query mute status and gain level.
    - **Wolverine Controller Plugin**: Monitor connection status and battery profile.
 2. **Logitech Key-Press Wake**: Incorporate receiver wake packet tracking to trigger faster battery updates when keyboard keys are pressed (since Windows locks keyboard HID paths by default).
 3. **Bluetooth LE Battery Monitoring**: Extend discovery patterns to capture standard Bluetooth LE battery profile reports.
