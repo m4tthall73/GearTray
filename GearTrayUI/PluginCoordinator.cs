@@ -230,8 +230,19 @@ public class PluginCoordinator
         _plugins = plugins;
     }
 
+    public static string? ConfigPathOverride { get; set; }
+
     private static string GetConfigPath()
     {
+        if (!string.IsNullOrEmpty(ConfigPathOverride))
+        {
+            string? dir = Path.GetDirectoryName(ConfigPathOverride);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            return ConfigPathOverride;
+        }
         string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         string folder = Path.Combine(appData, "GearTray");
         Directory.CreateDirectory(folder);
@@ -328,10 +339,17 @@ public class PluginCoordinator
     private void OnDeviceStatusChanged(object? sender, DeviceStatusEventArgs e)
     {
         // Marshall to UI thread if updating an ObservableCollection
-        Application.Current.Dispatcher.BeginInvoke(() =>
+        if (Application.Current != null)
+        {
+            Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                UpdateDeviceStatus(e);
+            });
+        }
+        else
         {
             UpdateDeviceStatus(e);
-        });
+        }
     }
 
     private void UpdateDeviceStatus(DeviceStatusEventArgs status)
