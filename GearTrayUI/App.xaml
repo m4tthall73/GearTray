@@ -1,0 +1,25 @@
+<Application x:Class="GearTrayUI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:GearTrayUI"
+             Startup="OnStartup">
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- Value Converters for Dynamic UI Layout -->
+            <local:BatteryVisibilityConverter x:Key="BatteryVisibilityConverter"/>
+            <local:DoubleToBoolConverter x:Key="DoubleToBoolConverter"/>
+            <local:ControlTypeVisibilityConverter x:Key="ControlTypeVisibilityConverter"/>
+            <local:DeviceTypeToIconConverter x:Key="DeviceTypeToIconConverter"/>
+            <local:PowerStatusConverter x:Key="PowerStatusConverter"/>
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+
+            <!-- Color Theme System -->
+            <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#1C1C1C"/>
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#282828"/>
+            <SolidColorBrush x:Key="TextBrush" Color="#FFFFFF"/>
+            <SolidColorBrush x:Key="MutedTextBrush" Color="#A0A0A0"/>
+            <SolidColorBrush x:Key="AccentBrush" Color="#007ACC"/>
+            <SolidColorBrush x:Key="BorderBrushSoft" Color="#3C3C3C"/>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

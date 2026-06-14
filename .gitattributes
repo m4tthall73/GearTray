@@ -1,0 +1,15 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Specify language-specific diff behaviors
+*.cs text diff=csharp
+*.xaml text
+*.xml text
+*.md text
+*.json text
+
+# Standardize line endings on Windows-specific files (MSBuild and Visual Studio require CRLF)
+*.sln text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf

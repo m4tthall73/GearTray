@@ -1,0 +1,38 @@
+## Build folders
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+
+## Visual Studio local files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.suo.tmp
+
+## Visual Studio Code local files
+.vscode/
+.history/
+
+## NuGet packages and props
+packages/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.assets.json
+
+## Rider / JetBrains files
+.idea/
+*.sln.iml
+
+## Windows OS metadata
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+## Local user config and logs
+config.json
+*.log
+*.log.txt
