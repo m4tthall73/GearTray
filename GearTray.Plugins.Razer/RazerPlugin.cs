@@ -20,6 +20,7 @@ namespace GearTray.Plugins.Razer
         private readonly object _syncLock = new();
 
         private MMDeviceEnumerator? _deviceEnumerator;
+        private System.Windows.Threading.Dispatcher? _dispatcher;
         private bool _isInitialized;
 
         public void Initialize()
@@ -28,6 +29,8 @@ namespace GearTray.Plugins.Razer
             {
                 if (_isInitialized) return;
                 _isInitialized = true;
+
+                _dispatcher = System.Windows.Application.Current?.Dispatcher;
 
                 try
                 {
@@ -176,14 +179,17 @@ namespace GearTray.Plugins.Razer
                         Value = isMuted ? 1.0 : 0.0,
                         OnControlChanged = (val) =>
                         {
-                            try
+                            RunOnDispatcher(() =>
                             {
-                                mic.AudioEndpointVolume.Mute = val > 0.5;
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"RazerPlugin: Mute failed: {ex.Message}");
-                            }
+                                try
+                                {
+                                    mic.AudioEndpointVolume.Mute = val > 0.5;
+                                }
+                                catch (Exception ex)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"RazerPlugin: Mute failed: {ex.Message}");
+                                }
+                            });
                         }
                     },
                     new DeviceControl
@@ -194,14 +200,17 @@ namespace GearTray.Plugins.Razer
                         Value = volume,
                         OnControlChanged = (val) =>
                         {
-                            try
+                            RunOnDispatcher(() =>
                             {
-                                mic.AudioEndpointVolume.MasterVolumeLevelScalar = (float)Math.Clamp(val, 0.0, 1.0);
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"RazerPlugin: Gain adjust failed: {ex.Message}");
-                            }
+                                try
+                                {
+                                    mic.AudioEndpointVolume.MasterVolumeLevelScalar = (float)Math.Clamp(val, 0.0, 1.0);
+                                }
+                                catch (Exception ex)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"RazerPlugin: Gain adjust failed: {ex.Message}");
+                                }
+                            });
                         }
                     }
                 };
@@ -249,39 +258,54 @@ namespace GearTray.Plugins.Razer
             }
         }
 
+        private void RunOnDispatcher(Action action)
+        {
+            if (_dispatcher != null && !_dispatcher.CheckAccess())
+            {
+                _dispatcher.BeginInvoke(action);
+            }
+            else
+            {
+                action();
+            }
+        }
+
         private void OnVolumeNotification(AudioVolumeNotificationData data)
         {
-            // Re-notify status for all monitored microphones since volume notification triggers
-            lock (_syncLock)
+            RunOnDispatcher(() =>
             {
-                foreach (var mic in _monitoredDevices.Values)
+                // Re-notify status for all monitored microphones since volume notification triggers
+                lock (_syncLock)
                 {
-                    NotifyDeviceStatus(mic);
+                    foreach (var mic in _monitoredDevices.Values)
+                    {
+                        NotifyDeviceStatus(mic);
+                    }
                 }
-            }
+            });
         }
 
         // IMMNotificationClient Implementation
         public void OnDeviceStateChanged(string deviceId, DeviceState newState)
         {
-            RefreshRazerMics();
+            RunOnDispatcher(() => RefreshRazerMics());
         }
 
         public void OnDeviceAdded(string deviceId)
         {
-            RefreshRazerMics();
+            RunOnDispatcher(() => RefreshRazerMics());
         }
 
         public void OnDeviceRemoved(string deviceId)
         {
-            RefreshRazerMics();
+            RunOnDispatcher(() => RefreshRazerMics());
         }
 
         public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
         {
             if (flow == DataFlow.Capture)
             {
-                RefreshRazerMics();
+                RunOnDispatcher(() => RefreshRazerMics());
             }
         }
 
