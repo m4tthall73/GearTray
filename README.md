@@ -56,6 +56,7 @@ The core architectural philosophy of GearTray is strict decoupling. The UI does 
 - [GearTray.Plugins.Audio](file:///d:/Projects/GearTray/GearTray.Plugins.Audio): Interfaces with Windows WASAPI via NAudio to manage default audio endpoints, master volume, and mute states.
 - [GearTray.Plugins.Logitech](file:///d:/Projects/GearTray/GearTray.Plugins.Logitech): Enumerates USB receivers and queries Logitech keyboards, mice, and headsets directly via HID++ protocol commands over `hidapi.dll`.
 - [GearTrayUI](file:///d:/Projects/GearTray/GearTrayUI): The WPF user interface. Coordinates registered plugins via `PluginCoordinator`, instantiates the Hardcodet `TaskbarIcon`, and renders the dynamic system tray context menu.
+- [GearTray.Tests](file:///d:/Projects/GearTray/GearTray.Tests): The xUnit & Moq testing suite that validates event logs, state transitions, config loading/saving, and battery alerts.
 
 ---
 
@@ -72,7 +73,22 @@ Instead of rendering static menus, `TrayResources.xaml` dynamically binds to `Ap
 
 ---
 
-## 5. Acknowledgements
+## 5. Running Unit Tests
+
+To run the automated tests, open a terminal in the root of the workspace and run:
+
+```bash
+dotnet test
+```
+
+This will run all xUnit test classes validating:
+* `EventLogger` reverse chronological buffering, bounds limits (500 entries), and auto-detecting categories/colors.
+* `LogitechPlugin` status event deduplication and online-offline state recovery.
+* `PluginCoordinator` settings persistence, custom device names, and battery alert threshold checks.
+
+---
+
+## 6. Acknowledgements
 
 We want to thank the developers of the original applications and libraries that made this integration possible:
 - **`PowerTray`** (by [JumpTwiceShou](https://github.com/JumpTwiceShou/PowerTray)) and the upstream **`LGSTrayBattery`** (by [andyvorld](https://github.com/andyvorld/LGSTrayBattery)), which provided the excellent HID++ implementation.
@@ -82,12 +98,12 @@ We want to thank the developers of the original applications and libraries that 
 
 ---
 
-## 6. What is Remaining (Roadmap)
+## 7. What is Remaining (Roadmap)
 
-Future agents or developers should focus on the following features to complete the system:
-1. **Dynamic Audio Device Switching**: Extend `AudioPlugin` to expose additional controls for switching the default audio output playback device directly from the tray.
-2. **Additional Device Plugins**: 
+Future developers or agents should focus on the following items to extend the utility:
+1. **Additional Device Plugins**: 
    - **Razer Mic Plugin**: Query mute status and gain level.
    - **Wolverine Controller Plugin**: Monitor connection status and battery profile.
-3. **Settings Window Configuration**: Create a premium dark-themed configuration UI in `MainWindow.xaml` to set low-battery notification thresholds, device aliases, quiet hours, and start-on-boot configuration.
-4. **Logitech Key-Press Wake**: Incorporate receiver wake packet tracking to trigger faster battery updates when keyboard keys are pressed (since Windows locks keyboard HID paths by default).
+2. **Logitech Key-Press Wake**: Incorporate receiver wake packet tracking to trigger faster battery updates when keyboard keys are pressed (since Windows locks keyboard HID paths by default).
+3. **Bluetooth LE Battery Monitoring**: Extend discovery patterns to capture standard Bluetooth LE battery profile reports.
+
