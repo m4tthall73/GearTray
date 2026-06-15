@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Windows.Data;
+using System.Windows.Media;
 using System.Linq;
 using GearTray.Contracts;
 
@@ -11,6 +12,9 @@ namespace GearTrayUI;
 
 public partial class MainWindow : Window
 {
+    private readonly System.Collections.Generic.Dictionary<string, DateTime> _lastSliderUpdateTimes = new();
+    private readonly System.Collections.Generic.Dictionary<string, System.Windows.Threading.DispatcherTimer> _sliderDeferredTimers = new();
+
     public ObservableCollection<LogEntry> EventsLog { get; } = [];
     public ObservableCollection<DeviceViewModel> DevicesList { get; } = [];
     private readonly ICollectionView _eventsView;
@@ -139,8 +143,21 @@ public partial class MainWindow : Window
         if (App.Coordinator != null)
         {
             var cached = App.Coordinator.GetCachedDevices().ToList();
-            EventLogger.Log("SYSTEM", $"Populating Devices tab. Cached devices count: {cached.Count}", "#888888");
-            foreach (var cache in cached)
+            var orderedCached = cached
+                .Select(c => {
+                    var dev = App.Coordinator.ActiveDevices.FirstOrDefault(d => d.DeviceId == c.DeviceId);
+                    bool isDefault = dev?.IsDefault ?? false;
+                    bool isOnline = dev?.IsOnline ?? false;
+                    return new { Cache = c, IsDefault = isDefault, IsOnline = isOnline };
+                })
+                .OrderByDescending(x => x.IsDefault)
+                .ThenByDescending(x => x.IsOnline)
+                .ThenBy(x => x.Cache.DisplayName)
+                .Select(x => x.Cache)
+                .ToList();
+
+            EventLogger.Log("SYSTEM", $"Populating Devices tab. Cached devices count: {orderedCached.Count}", "#888888");
+            foreach (var cache in orderedCached)
             {
                 DevicesList.Add(new DeviceViewModel
                 {
@@ -164,10 +181,33 @@ public partial class MainWindow : Window
             if (App.Coordinator != null)
             {
                 var cached = App.Coordinator.GetCachedDevices().ToList();
-                bool needsRepopulate = cached.Count != DevicesList.Count ||
-                    cached.Any(c => !DevicesList.Any(d => d.DeviceId == c.DeviceId));
+                var orderedCached = cached
+                    .Select(c => {
+                        var dev = App.Coordinator.ActiveDevices.FirstOrDefault(d => d.DeviceId == c.DeviceId);
+                        bool isDefault = dev?.IsDefault ?? false;
+                        bool isOnline = dev?.IsOnline ?? false;
+                        return new { Cache = c, IsDefault = isDefault, IsOnline = isOnline };
+                    })
+                    .OrderByDescending(x => x.IsDefault)
+                    .ThenByDescending(x => x.IsOnline)
+                    .ThenBy(x => x.Cache.DisplayName)
+                    .Select(x => x.Cache)
+                    .ToList();
 
-                System.Diagnostics.Debug.WriteLine($"OnDeviceListChanged: cached={cached.Count}, DevicesList={DevicesList.Count}, needsRepopulate={needsRepopulate}");
+                bool needsRepopulate = orderedCached.Count != DevicesList.Count;
+                if (!needsRepopulate)
+                {
+                    for (int i = 0; i < orderedCached.Count; i++)
+                    {
+                        if (DevicesList[i].DeviceId != orderedCached[i].DeviceId || DevicesList[i].Type != orderedCached[i].Type)
+                        {
+                            needsRepopulate = true;
+                            break;
+                        }
+                    }
+                }
+
+                System.Diagnostics.Debug.WriteLine($"OnDeviceListChanged: cached={orderedCached.Count}, DevicesList={DevicesList.Count}, needsRepopulate={needsRepopulate}");
 
                 if (needsRepopulate)
                 {
@@ -268,7 +308,71 @@ public partial class MainWindow : Window
             {
                 ctrl.Value = val;
                 ctrl.OnControlChanged?.Invoke(val);
+
+                // Trigger icon updates immediately
+                if (ctrl.DisplayName.Equals("Mute", StringComparison.OrdinalIgnoreCase))
+                {
+                    var coordinator = App.Coordinator;
+                    if (coordinator != null)
+                    {
+                        var dev = coordinator.ActiveDevices.FirstOrDefault(d => d.Controls.Contains(ctrl));
+                        if (dev != null)
+                        {
+                            dev.RaiseMuteChanged(); // Refresh popup icon
+
+                            var mainWindow = Application.Current.MainWindow as MainWindow;
+                            var vm = mainWindow?.DevicesList.FirstOrDefault(v => v.DeviceId == dev.DeviceId);
+                            vm?.RefreshDynamicStatus(); // Refresh Devices tab icon
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    private void ThrottleControlChange(DeviceControl ctrl, double value)
+    {
+        string key = ctrl.ControlId;
+        DateTime now = DateTime.UtcNow;
+
+        if (!_lastSliderUpdateTimes.TryGetValue(key, out var lastTime))
+        {
+            lastTime = DateTime.MinValue;
+        }
+
+        // Clean up any existing deferred timer
+        if (_sliderDeferredTimers.TryGetValue(key, out var timer))
+        {
+            timer.Stop();
+            _sliderDeferredTimers.Remove(key);
+        }
+
+        double elapsed = (now - lastTime).TotalMilliseconds;
+        if (elapsed >= 150)
+        {
+            // Update immediately
+            _lastSliderUpdateTimes[key] = now;
+            ctrl.OnControlChanged?.Invoke(value);
+        }
+        else
+        {
+            // Defer update
+            var newTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(150 - elapsed)
+            };
+            newTimer.Tick += (s, ev) =>
+            {
+                newTimer.Stop();
+                if (_sliderDeferredTimers.TryGetValue(key, out var activeTimer) && activeTimer == newTimer)
+                {
+                    _sliderDeferredTimers.Remove(key);
+                }
+                _lastSliderUpdateTimes[key] = DateTime.UtcNow;
+                ctrl.OnControlChanged?.Invoke(value);
+            };
+            _sliderDeferredTimers[key] = newTimer;
+            newTimer.Start();
         }
     }
 
@@ -280,7 +384,7 @@ public partial class MainWindow : Window
             if (slider.IsLoaded && Math.Abs(ctrl.Value - e.NewValue) > 0.01)
             {
                 ctrl.Value = e.NewValue;
-                ctrl.OnControlChanged?.Invoke(e.NewValue);
+                ThrottleControlChange(ctrl, e.NewValue);
             }
         }
     }
@@ -288,6 +392,19 @@ public partial class MainWindow : Window
     private void Slider_MouseUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         System.Media.SystemSounds.Beep.Play();
+        
+        // Force the immediate final value update on mouse up to make sure it's 100% applied
+        if (sender is Slider slider && slider.DataContext is DeviceControl ctrl)
+        {
+            string key = ctrl.ControlId;
+            if (_sliderDeferredTimers.TryGetValue(key, out var timer))
+            {
+                timer.Stop();
+                _sliderDeferredTimers.Remove(key);
+            }
+            _lastSliderUpdateTimes[key] = DateTime.UtcNow;
+            ctrl.OnControlChanged?.Invoke(slider.Value);
+        }
     }
 
     private void Button_Click(object sender, RoutedEventArgs e)
@@ -353,6 +470,9 @@ public class DeviceViewModel : INotifyPropertyChanged
     public string Category => (Type == DeviceType.Keyboard || Type == DeviceType.Mouse || Type == DeviceType.Controller)
         ? "Input Devices"
         : "Sound Devices";
+
+    public string ActiveStatusText => (Type == DeviceType.Microphone) ? "Active Recording Device" : "Active Playback Device";
+    public Geometry? IconGeometry => new DeviceTypeToIconConverter().Convert(this, typeof(Geometry), null, System.Globalization.CultureInfo.InvariantCulture) as Geometry;
 
     public bool UseDefaultThreshold
     {
@@ -499,15 +619,26 @@ public class DeviceViewModel : INotifyPropertyChanged
         IsPaused = false;
     }
 
+    private bool? _lastIsDefault;
+
     public void RefreshDynamicStatus()
     {
         OnPropertyChanged(nameof(IsOnline));
         OnPropertyChanged(nameof(Power));
         OnPropertyChanged(nameof(BatteryPercentage));
-        OnPropertyChanged(nameof(IsDefault));
-        OnPropertyChanged(nameof(Controls));
+        
+        bool currentIsDefault = IsDefault;
+        if (_lastIsDefault == null || _lastIsDefault.Value != currentIsDefault)
+        {
+            _lastIsDefault = currentIsDefault;
+            OnPropertyChanged(nameof(IsDefault));
+            OnPropertyChanged(nameof(Controls));
+        }
+
+        OnPropertyChanged(nameof(IconGeometry));
         OnPropertyChanged(nameof(BatteryPercentageText));
         OnPropertyChanged(nameof(LastUpdatedText));
+        OnPropertyChanged(nameof(ActiveStatusText));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

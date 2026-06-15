@@ -139,5 +139,69 @@ namespace GearTray.Tests
 
             coordinator.Shutdown();
         }
+
+        [Fact]
+        public void UpdateDeviceStatus_CacheUpdatesTypeWhenDeviceIdMatches()
+        {
+            // Arrange
+            var coordinator = new PluginCoordinator(_plugins);
+            coordinator.Initialize();
+
+            // Set up a mock device in CachedDevices
+            // We can raise a status update to save it in cache with Generic type first
+            var dev = new DeviceStatusEventArgs("test-device", "Razer Seiren", DeviceType.Generic, -1, PowerStatus.Wired, true);
+            _mockPlugin.Raise(p => p.DeviceStatusChanged += null, _mockPlugin.Object, dev);
+
+            // Verify it was added to cache with Generic type
+            var savedCache = coordinator.ActiveDevices.FirstOrDefault(d => d.DeviceId == "test-device");
+            Assert.NotNull(savedCache);
+            Assert.Equal(DeviceType.Generic, savedCache.Type);
+
+            // Raise status update with same DeviceId but Microphone type
+            var updatedDev = new DeviceStatusEventArgs("test-device", "Razer Seiren", DeviceType.Microphone, -1, PowerStatus.Wired, true);
+            _mockPlugin.Raise(p => p.DeviceStatusChanged += null, _mockPlugin.Object, updatedDev);
+
+            // Verify cache and ActiveDevices type was updated
+            var updatedCache = coordinator.ActiveDevices.FirstOrDefault(d => d.DeviceId == "test-device");
+            Assert.NotNull(updatedCache);
+            Assert.Equal(DeviceType.Microphone, updatedCache.Type);
+
+            coordinator.Shutdown();
+        }
+
+        [Fact]
+        public void UpdateDeviceStatus_HeadsetOfflineRestoresBackupMicFallback()
+        {
+            // Arrange
+            var mockAudioPlugin = new Mock<GearTray.Plugins.Audio.AudioPlugin>();
+            mockAudioPlugin.Setup(p => p.PluginId).Returns("GearTray.Plugins.Audio");
+            mockAudioPlugin.Setup(p => p.DisplayName).Returns("Windows Audio Controller");
+            mockAudioPlugin.Setup(p => p.GetActiveDevices()).Returns(Enumerable.Empty<DeviceStatusEventArgs>());
+            mockAudioPlugin.Setup(p => p.GetDefaultCaptureDeviceId()).Returns("headset_mic_id");
+            mockAudioPlugin.Setup(p => p.FindCaptureDeviceIdByName(It.IsAny<string>())).Returns("headset_mic_id");
+            
+            var testPlugins = new List<IDevicePlugin> { _mockPlugin.Object, mockAudioPlugin.Object };
+            var coordinator = new PluginCoordinator(testPlugins);
+            coordinator.Initialize();
+            coordinator.AutoSwitchMicrophone = true;
+
+            // Make sure we have a backup microphone online in the coordinator
+            var razerMic = new DeviceStatusEventArgs("razer_mic_id", "Razer Seiren", DeviceType.Microphone, -1, PowerStatus.Wired, true);
+            _mockPlugin.Raise(p => p.DeviceStatusChanged += null, _mockPlugin.Object, razerMic);
+
+            // Put headset online
+            var headsetOnline = new DeviceStatusEventArgs("headset_id", "Headphones (Arctis Nova 7X)", DeviceType.Headset, 80, PowerStatus.Discharging, true);
+            _mockPlugin.Raise(p => p.DeviceStatusChanged += null, _mockPlugin.Object, headsetOnline);
+
+            // Stored PreviousDefaultCaptureDeviceId should be razer_mic_id because currentMic (headset_mic_id) matches the headset microphone
+            // Let's verify the restore logic when headset goes offline
+            var headsetOffline = new DeviceStatusEventArgs("headset_id", "Headphones (Arctis Nova 7X)", DeviceType.Headset, 80, PowerStatus.PoweredOff, false);
+            _mockPlugin.Raise(p => p.DeviceStatusChanged += null, _mockPlugin.Object, headsetOffline);
+
+            // Verify that SetDefaultCaptureDevice was called with razer_mic_id
+            mockAudioPlugin.Verify(p => p.SetDefaultCaptureDevice("razer_mic_id"), Times.Once);
+
+            coordinator.Shutdown();
+        }
     }
 }

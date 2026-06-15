@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Linq;
 using GearTray.Contracts;
 
 namespace GearTrayUI
@@ -34,12 +35,33 @@ namespace GearTrayUI
 
         private void Control_Changed(object sender, RoutedEventArgs e)
         {
-            if (sender is FrameworkElement fe && fe.DataContext is DeviceControl ctrl)
+            if (sender is CheckBox cb && cb.DataContext is DeviceControl ctrl)
             {
-                bool isChecked = ((CheckBox)sender).IsChecked == true;
+                bool isChecked = cb.IsChecked == true;
                 double val = isChecked ? 1.0 : 0.0;
-                ctrl.Value = val;
-                ctrl.OnControlChanged?.Invoke(val);
+                if (cb.IsLoaded && Math.Abs(ctrl.Value - val) > 0.01)
+                {
+                    ctrl.Value = val;
+                    ctrl.OnControlChanged?.Invoke(val);
+
+                    // Trigger icon updates immediately
+                    if (ctrl.DisplayName.Equals("Mute", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var coordinator = App.Coordinator;
+                        if (coordinator != null)
+                        {
+                            var dev = coordinator.ActiveDevices.FirstOrDefault(d => d.Controls.Contains(ctrl));
+                            if (dev != null)
+                            {
+                                dev.RaiseMuteChanged(); // Refresh popup icon
+
+                                var mainWindow = Application.Current.MainWindow as MainWindow;
+                                var vm = mainWindow?.DevicesList.FirstOrDefault(v => v.DeviceId == dev.DeviceId);
+                                vm?.RefreshDynamicStatus(); // Refresh Devices tab icon
+                            }
+                        }
+                    }
+                }
             }
         }
 

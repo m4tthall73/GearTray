@@ -113,8 +113,14 @@
                                                             </Ellipse>
                                                             
                                                             <!-- Vector icon representing the peripheral type -->
-                                                            <Path Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center"
-                                                                  Data="{Binding Converter={StaticResource DeviceTypeToIconConverter}}">
+                                                            <Path Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                                <Path.Data>
+                                                                    <MultiBinding Converter="{StaticResource DeviceTypeToIconConverter}">
+                                                                        <Binding Path="Type"/>
+                                                                        <Binding Path="IsDefault"/>
+                                                                        <Binding Path="IsMuted"/>
+                                                                    </MultiBinding>
+                                                                </Path.Data>
                                                                 <Path.Style>
                                                                     <Style TargetType="Path">
                                                                         <Setter Property="Fill" Value="{DynamicResource MutedTextBrush}"/>
@@ -335,7 +341,7 @@
                                                         <ColumnDefinition Width="*"/>
                                                     </Grid.ColumnDefinitions>
                                                     <Path Width="16" Height="16" Stretch="Uniform" Margin="0,0,12,0" VerticalAlignment="Center"
-                                                          Data="{Binding Converter={StaticResource DeviceTypeToIconConverter}}">
+                                                          Data="{Binding IconGeometry}">
                                                         <Path.Style>
                                                             <Style TargetType="Path">
                                                                 <Setter Property="Fill" Value="{DynamicResource MutedTextBrush}"/>
@@ -489,7 +495,7 @@
                                                 </Grid.ColumnDefinitions>
                                                 
                                                 <Path Width="16" Height="16" Stretch="Uniform" Margin="0,0,12,0" VerticalAlignment="Center"
-                                                      Data="{Binding Converter={StaticResource DeviceTypeToIconConverter}}">
+                                                      Data="{Binding IconGeometry}">
                                                     <Path.Style>
                                                         <Style TargetType="Path">
                                                             <Setter Property="Fill" Value="{DynamicResource MutedTextBrush}"/>
@@ -506,7 +512,7 @@
                                                     <StackPanel Orientation="Horizontal">
                                                         <TextBlock Text="{Binding DisplayName}" Foreground="{DynamicResource TextBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
                                                         <Border x:Name="ActiveIndicator" Background="{DynamicResource AccentBrush}" CornerRadius="3" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
-                                                            <TextBlock Text="Active Playback Device" Foreground="White" FontSize="9" FontWeight="Bold"/>
+                                                            <TextBlock Text="{Binding ActiveStatusText}" Foreground="White" FontSize="9" FontWeight="Bold"/>
                                                         </Border>
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding DeviceId}" Foreground="{DynamicResource MutedTextBrush}" FontSize="10" Margin="0,2,0,0"/>

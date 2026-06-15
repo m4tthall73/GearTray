@@ -406,12 +406,21 @@ public class PluginCoordinator
             var existingCache = _config.CachedDevices.FirstOrDefault(x => x.DisplayName == status.DisplayName);
             if (existingCache != null)
             {
+                bool modified = false;
                 if (existingCache.DeviceId != status.DeviceId)
                 {
                     existingCache.DeviceId = status.DeviceId;
+                    modified = true;
+                }
+                if (existingCache.Type != status.Type)
+                {
                     existingCache.Type = status.Type;
+                    modified = true;
+                }
+                if (modified)
+                {
                     SaveConfig(_config);
-                    GearTray.Contracts.EventLogger.Log("SYSTEM", $"Cache updated: {status.DisplayName} with ID {status.DeviceId}", "#888888");
+                    GearTray.Contracts.EventLogger.Log("SYSTEM", $"Cache updated: {status.DisplayName} with ID {status.DeviceId} (Type: {status.Type})", "#888888");
                 }
             }
             else
@@ -476,12 +485,7 @@ public class PluginCoordinator
                 if (audioPlugin != null)
                 {
                     string? currentMic = audioPlugin.GetDefaultCaptureDeviceId();
-                    if (currentMic != null)
-                    {
-                        _config.PreviousDefaultCaptureDeviceId = currentMic;
-                        SaveConfig(_config);
-                    }
-
+                    
                     // Extract core model name from display name (e.g. "Arctis Nova 7X")
                     string cleanModel = status.DisplayName
                         .Replace("Headphones", "", StringComparison.OrdinalIgnoreCase)
@@ -489,7 +493,63 @@ public class PluginCoordinator
                         .Replace("Wireless", "", StringComparison.OrdinalIgnoreCase)
                         .Replace("(", "").Replace(")", "").Trim();
 
+                    // Check if Windows has already switched to the headset mic by default
+                    bool isHeadsetMic = false;
                     string? headsetMicId = audioPlugin.FindCaptureDeviceIdByName(cleanModel);
+                    if (currentMic != null && headsetMicId != null && string.Equals(currentMic, headsetMicId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isHeadsetMic = true;
+                    }
+
+                    if (currentMic == null || isHeadsetMic)
+                    {
+                        // Search for another online microphone in our cache to use as the previous default (e.g. Razer Seiren)
+                        var otherMic = _allDevices.Values.FirstOrDefault(d => 
+                            d.IsOnline && 
+                            d.Type == DeviceType.Microphone && 
+                            !d.DisplayName.Contains("Arctis", StringComparison.OrdinalIgnoreCase) &&
+                            !d.DisplayName.Contains("Nova", StringComparison.OrdinalIgnoreCase) &&
+                            !d.DisplayName.Contains("SteelSeries", StringComparison.OrdinalIgnoreCase));
+                        
+                        if (otherMic != null)
+                        {
+                            currentMic = otherMic.DeviceId;
+                        }
+                        else
+                        {
+                            // Fallback to cached device list
+                            var cachedMic = _config.CachedDevices.FirstOrDefault(c =>
+                                c.Type == DeviceType.Microphone &&
+                                !c.DisplayName.Contains("Arctis", StringComparison.OrdinalIgnoreCase) &&
+                                !c.DisplayName.Contains("Nova", StringComparison.OrdinalIgnoreCase) &&
+                                !c.DisplayName.Contains("SteelSeries", StringComparison.OrdinalIgnoreCase));
+
+                            if (cachedMic != null)
+                            {
+                                currentMic = cachedMic.DeviceId;
+                            }
+                        }
+
+                        if (currentMic != null && currentMic.StartsWith("audio_dev_"))
+                        {
+                            currentMic = currentMic.Substring("audio_dev_".Length);
+                        }
+                    }
+
+                    // Check if currentMic is still the headset mic
+                    bool isStillHeadsetMic = false;
+                    if (currentMic != null && headsetMicId != null && string.Equals(currentMic, headsetMicId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        isStillHeadsetMic = true;
+                    }
+
+                    if (currentMic != null && !isStillHeadsetMic)
+                    {
+                        _config.PreviousDefaultCaptureDeviceId = currentMic;
+                        SaveConfig(_config);
+                        GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", $"AutoSwitch: Stored previous default recording device: {currentMic}", "#8A2BE2");
+                    }
+
                     if (headsetMicId != null)
                     {
                         GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", $"AutoSwitch: Automatically selected microphone for '{status.DisplayName}' as default recording device", "#8A2BE2");
@@ -521,13 +581,64 @@ public class PluginCoordinator
             // Auto-restore previous capture input when headphones go offline
             if (_config.AutoSwitchMicrophone && status.Type == DeviceType.Headset && wasOnline)
             {
-                if (!string.IsNullOrEmpty(_config.PreviousDefaultCaptureDeviceId))
+                var audioPlugin = _plugins.OfType<GearTray.Plugins.Audio.AudioPlugin>().FirstOrDefault();
+                if (audioPlugin != null)
                 {
-                    var audioPlugin = _plugins.OfType<GearTray.Plugins.Audio.AudioPlugin>().FirstOrDefault();
-                    if (audioPlugin != null)
+                    string? targetMicId = _config.PreviousDefaultCaptureDeviceId;
+                    
+                    // Check if targetMicId is empty or is the headset mic itself
+                    string cleanModel = status.DisplayName
+                        .Replace("Headphones", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("Headset", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("Wireless", "", StringComparison.OrdinalIgnoreCase)
+                        .Replace("(", "").Replace(")", "").Trim();
+                    string? headsetMicId = audioPlugin.FindCaptureDeviceIdByName(cleanModel);
+                    
+                    bool isTargetHeadset = false;
+                    if (!string.IsNullOrEmpty(targetMicId) && headsetMicId != null && string.Equals(targetMicId, headsetMicId, StringComparison.OrdinalIgnoreCase))
                     {
-                        GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", "AutoSwitch: Headset went offline, restoring previous recording device", "#8A2BE2");
-                        audioPlugin.SetDefaultCaptureDevice(_config.PreviousDefaultCaptureDeviceId);
+                        isTargetHeadset = true;
+                    }
+                    
+                    if (string.IsNullOrEmpty(targetMicId) || isTargetHeadset)
+                    {
+                        // Search for another online microphone in our cache to use as the previous default (e.g. Razer Seiren)
+                        var otherMic = _allDevices.Values.FirstOrDefault(d => 
+                            d.IsOnline && 
+                            d.Type == DeviceType.Microphone && 
+                            !d.DisplayName.Contains("Arctis", StringComparison.OrdinalIgnoreCase) &&
+                            !d.DisplayName.Contains("Nova", StringComparison.OrdinalIgnoreCase) &&
+                            !d.DisplayName.Contains("SteelSeries", StringComparison.OrdinalIgnoreCase));
+                        
+                        if (otherMic != null)
+                        {
+                            targetMicId = otherMic.DeviceId;
+                        }
+                        else
+                        {
+                            // Fallback to cached device list
+                            var cachedMic = _config.CachedDevices.FirstOrDefault(c =>
+                                c.Type == DeviceType.Microphone &&
+                                !c.DisplayName.Contains("Arctis", StringComparison.OrdinalIgnoreCase) &&
+                                !c.DisplayName.Contains("Nova", StringComparison.OrdinalIgnoreCase) &&
+                                !c.DisplayName.Contains("SteelSeries", StringComparison.OrdinalIgnoreCase));
+
+                            if (cachedMic != null)
+                            {
+                                targetMicId = cachedMic.DeviceId;
+                            }
+                        }
+
+                        if (targetMicId != null && targetMicId.StartsWith("audio_dev_"))
+                        {
+                            targetMicId = targetMicId.Substring("audio_dev_".Length);
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(targetMicId))
+                    {
+                        GearTray.Contracts.EventLogger.Log("AUDIO_SWITCH", $"AutoSwitch: Headset went offline, restoring previous recording device: {targetMicId}", "#8A2BE2");
+                        audioPlugin.SetDefaultCaptureDevice(targetMicId);
                     }
                 }
             }
@@ -549,41 +660,67 @@ public class PluginCoordinator
             .Where(d => d.IsOnline || _config.ShowOfflineDevices)
             .GroupBy(d => d.DisplayName)
             .Select(g => g.OrderByDescending(d => d.IsOnline).First())
+            .OrderByDescending(d => d.IsDefault)
+            .ThenBy(d => d.DisplayName)
             .ToList();
 
-        // Remove old devices
-        for (int i = ActiveDevices.Count - 1; i >= 0; i--)
+        // Adjust ActiveDevices to match the exact order of listToDisplay
+        for (int i = 0; i < listToDisplay.Count; i++)
         {
-            var dev = ActiveDevices[i];
-            if (!listToDisplay.Any(x => x.DeviceId == dev.DeviceId))
-            {
-                ActiveDevices.RemoveAt(i);
-            }
-        }
-
-        // Add or update existing devices
-        foreach (var dev in listToDisplay)
-        {
-            var existing = ActiveDevices.FirstOrDefault(x => x.DeviceId == dev.DeviceId);
+            var targetDev = listToDisplay[i];
+            var existing = ActiveDevices.FirstOrDefault(x => x.DeviceId == targetDev.DeviceId);
+            
             if (existing != null)
             {
-                int idx = ActiveDevices.IndexOf(existing);
-                // Replace if status properties or controls changed
-                if (existing.IsOnline != dev.IsOnline || 
-                    existing.BatteryPercentage != dev.BatteryPercentage || 
-                    existing.Power != dev.Power ||
-                    existing.DisplayName != dev.DisplayName ||
-                    existing.IsDefault != dev.IsDefault ||
-                    existing.Controls.Count != dev.Controls.Count ||
-                    existing.Controls.Any(c => !dev.Controls.Any(dc => dc.ControlId == c.ControlId)))
+                int existingIdx = ActiveDevices.IndexOf(existing);
+                bool structuralChanged = existing.IsOnline != targetDev.IsOnline || 
+                                         existing.Type != targetDev.Type ||
+                                         existing.BatteryPercentage != targetDev.BatteryPercentage || 
+                                         existing.Power != targetDev.Power ||
+                                         existing.DisplayName != targetDev.DisplayName ||
+                                         existing.IsDefault != targetDev.IsDefault ||
+                                         existing.Controls.Count != targetDev.Controls.Count ||
+                                         existing.Controls.Any(c => {
+                                             var tc = targetDev.Controls.FirstOrDefault(dc => dc.ControlId == c.ControlId);
+                                             return tc == null;
+                                         });
+                
+                if (structuralChanged)
                 {
-                    ActiveDevices[idx] = dev;
+                    ActiveDevices.RemoveAt(existingIdx);
+                    ActiveDevices.Insert(i, targetDev);
+                }
+                else
+                {
+                    // No structural changes, just update control values in-place
+                    foreach (var c in existing.Controls)
+                    {
+                        var tc = targetDev.Controls.FirstOrDefault(dc => dc.ControlId == c.ControlId);
+                        if (tc != null && Math.Abs(c.Value - tc.Value) > 0.01)
+                        {
+                            c.Value = tc.Value;
+                            if (c.DisplayName.Equals("Mute", StringComparison.OrdinalIgnoreCase))
+                            {
+                                existing.RaiseMuteChanged();
+                            }
+                        }
+                    }
+                    if (existingIdx != i)
+                    {
+                        ActiveDevices.Move(existingIdx, i);
+                    }
                 }
             }
             else
             {
-                ActiveDevices.Add(dev);
+                ActiveDevices.Insert(i, targetDev);
             }
+        }
+
+        // Remove any extra devices at the end
+        while (ActiveDevices.Count > listToDisplay.Count)
+        {
+            ActiveDevices.RemoveAt(ActiveDevices.Count - 1);
         }
 
         DeviceListChanged?.Invoke();

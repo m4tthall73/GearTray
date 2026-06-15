@@ -1,4 +1,37 @@
+using System;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
 namespace GearTray.Contracts;
+
+public class DeviceControl : INotifyPropertyChanged
+{
+    public string ControlId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string ControlType { get; set; } = "Toggle"; // Toggle, Slider, Action
+    
+    private double _value;
+    public double Value
+    {
+        get => _value;
+        set
+        {
+            if (Math.Abs(_value - value) > 0.0001)
+            {
+                _value = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+    
+    public Action<double>? OnControlChanged { get; set; }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+}
 
 public enum DeviceType
 {
@@ -22,16 +55,8 @@ public enum PowerStatus
     PoweredOff
 }
 
-public class DeviceControl
-{
-    public string ControlId { get; set; } = string.Empty;
-    public string DisplayName { get; set; } = string.Empty;
-    public string ControlType { get; set; } = "Toggle"; // Toggle, Slider, Action
-    public double Value { get; set; }
-    public Action<double>? OnControlChanged { get; set; }
-}
 
-public class DeviceStatusEventArgs : EventArgs
+public class DeviceStatusEventArgs : EventArgs, INotifyPropertyChanged
 {
     public string DeviceId { get; }
     public string DisplayName { get; }
@@ -64,6 +89,35 @@ public class DeviceStatusEventArgs : EventArgs
         IsOnline = isOnline;
         Controls = controls ?? [];
         IsDefault = isDefault;
+    }
+
+    public bool IsMuted
+    {
+        get
+        {
+            if (Controls == null) return false;
+            for (int i = 0; i < Controls.Count; i++)
+            {
+                var c = Controls[i];
+                if (c.DisplayName != null && c.DisplayName.Equals("Mute", StringComparison.OrdinalIgnoreCase) && c.Value > 0.5)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    public void RaiseMuteChanged()
+    {
+        OnPropertyChanged(nameof(IsMuted));
+        OnPropertyChanged(string.Empty);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 }
 

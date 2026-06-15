@@ -11,12 +11,16 @@ namespace GearTray.Plugins.Audio;
 
 public class AudioPlugin : IDevicePlugin, IMMNotificationClient
 {
-    public string PluginId => "GearTray.Plugins.Audio";
-    public string DisplayName => "Windows Audio Controller";
+    public virtual string PluginId => "GearTray.Plugins.Audio";
+    public virtual string DisplayName => "Windows Audio Controller";
  
     private MMDeviceEnumerator? _deviceEnumerator;
     private MMDevice? _defaultRenderDevice;
     private AudioEndpointVolume? _volumeControl;
+    private AudioEndpointVolumeNotificationDelegate? _volumeNotificationDelegate;
+    private MMDevice? _defaultCaptureDevice;
+    private AudioEndpointVolume? _captureVolumeControl;
+    private AudioEndpointVolumeNotificationDelegate? _captureVolumeNotificationDelegate;
     private readonly List<DeviceControl> _controls = [];
  
     public event EventHandler<DeviceStatusEventArgs>? DeviceStatusChanged;
@@ -172,18 +176,19 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
  
-    public void Initialize()
+    public virtual void Initialize()
     {
         _dispatcher = System.Windows.Application.Current?.Dispatcher;
         _deviceEnumerator = new MMDeviceEnumerator();
         _deviceEnumerator.RegisterEndpointNotificationCallback(this);
         RefreshAudioEndpoint();
-
+        RefreshCaptureAudioEndpoint();
+ 
         // Start SteelSeries headset polling timer (every 5 seconds, first tick immediate)
         _pollTimer = new System.Threading.Timer(OnPollTimerTick, null, 0, 5000);
     }
  
-    public void Shutdown()
+    public virtual void Shutdown()
     {
         _pollTimer?.Dispose();
         _pollTimer = null;
@@ -194,10 +199,22 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
         if (_volumeControl != null)
         {
-            _volumeControl.OnVolumeNotification -= OnVolumeChanged;
+            if (_volumeNotificationDelegate != null)
+            {
+                _volumeControl.OnVolumeNotification -= _volumeNotificationDelegate;
+            }
             _volumeControl.Dispose();
         }
+        if (_captureVolumeControl != null)
+        {
+            if (_captureVolumeNotificationDelegate != null)
+            {
+                _captureVolumeControl.OnVolumeNotification -= _captureVolumeNotificationDelegate;
+            }
+            _captureVolumeControl.Dispose();
+        }
         _defaultRenderDevice?.Dispose();
+        _defaultCaptureDevice?.Dispose();
         _deviceEnumerator?.Dispose();
     }
 
@@ -260,7 +277,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
  
-    public IEnumerable<DeviceStatusEventArgs> GetActiveDevices()
+    public virtual IEnumerable<DeviceStatusEventArgs> GetActiveDevices()
     {
         RefreshAudioEndpoint();
         
@@ -275,99 +292,49 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
             {
                 if (device.State == DeviceState.NotPresent || device.State == DeviceState.Unplugged)
                 {
+                    device.Dispose();
                     continue;
                 }
                 string devId = device.ID.ToLowerInvariant();
-                string friendlyName = device.FriendlyName;
                 bool isDefault = (_defaultRenderDevice != null && string.Equals(_defaultRenderDevice.ID, devId, StringComparison.OrdinalIgnoreCase));
+                
+                deviceList.Add(CreateRenderDeviceStatus(device, isDefault));
+                device.Dispose();
+            }
 
-                // Determine DeviceType for the icon
-                DeviceType type = DeviceType.AudioOutput;
-                string lowerName = friendlyName.ToLowerInvariant();
-                if (lowerName.Contains("headset") || lowerName.Contains("headphone") || 
-                    lowerName.Contains("earphone") || lowerName.Contains("buds") || 
-                    lowerName.Contains("headphones"))
+            // Enumerate Capture endpoints
+            var captureEndpoints = _deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.All);
+            string defaultCaptureId = string.Empty;
+            try
+            {
+                using (var defaultCapture = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console))
                 {
-                    type = DeviceType.Headset;
+                    defaultCaptureId = defaultCapture?.ID ?? string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetActiveDevices Capture Default Error: {ex.Message}");
+            }
+
+            foreach (var device in captureEndpoints)
+            {
+                if (device.State == DeviceState.NotPresent || device.State == DeviceState.Unplugged)
+                {
+                    device.Dispose();
+                    continue;
+                }
+                string friendlyName = device.FriendlyName;
+
+                // Skip Razer microphones as they are handled by RazerPlugin
+                if (friendlyName.Contains("Razer", StringComparison.OrdinalIgnoreCase))
+                {
+                    device.Dispose();
+                    continue;
                 }
 
-                var controls = new List<DeviceControl>();
-
-                if (isDefault)
-                {
-                    // Default active device has Volume and Mute controls
-                    var mute = new DeviceControl
-                    {
-                        ControlId = $"audio_mute_{devId}",
-                        DisplayName = "Mute",
-                        ControlType = "Toggle",
-                        Value = IsMuted() ? 1 : 0,
-                        OnControlChanged = (val) => SetMuted(val > 0.5)
-                    };
-
-                    var vol = new DeviceControl
-                    {
-                        ControlId = $"audio_volume_{devId}",
-                        DisplayName = "Volume",
-                        ControlType = "Slider",
-                        Value = GetVolume() * 100,
-                        OnControlChanged = (val) => SetVolume((float)(val / 100.0))
-                    };
-
-                    controls.Add(mute);
-                    controls.Add(vol);
-                }
-                else
-                {
-                    // Inactive devices expose an "Activate" button
-                    var activateAction = new DeviceControl
-                    {
-                        ControlId = $"audio_activate_{devId}",
-                        DisplayName = "Activate",
-                        ControlType = "Action",
-                        Value = 0,
-                        OnControlChanged = (val) =>
-                        {
-                            if (val > 0.5)
-                            {
-                                SetDefaultDevice(devId);
-                            }
-                        }
-                    };
-                    controls.Add(activateAction);
-                }
-
-                PowerStatus power = PowerStatus.Wired;
-                bool isOnline = device.State == DeviceState.Active;
-                int battery = -1;
-
-                bool isSteelSeries = lowerName.Contains("arctis") || lowerName.Contains("nova") || lowerName.Contains("steelseries");
-                if (isSteelSeries)
-                {
-                    isOnline = _headsetOnline;
-                    power = _headsetPower;
-                    battery = _headsetBattery;
-                }
-                else if (lowerName.Contains("wireless") || lowerName.Contains("bluetooth"))
-                {
-                    power = isOnline ? PowerStatus.Unknown : PowerStatus.PoweredOff;
-                }
-                else if (!isOnline)
-                {
-                    power = type == DeviceType.Headset ? PowerStatus.PoweredOff : PowerStatus.Unknown;
-                }
-
-                deviceList.Add(new DeviceStatusEventArgs(
-                    deviceId: "audio_dev_" + devId,
-                    displayName: friendlyName,
-                    type: type,
-                    batteryPercentage: battery,
-                    power: power,
-                    isOnline: isOnline,
-                    controls: controls,
-                    isDefault: isDefault
-                ));
-
+                bool isDefault = string.Equals(defaultCaptureId, device.ID, StringComparison.OrdinalIgnoreCase);
+                deviceList.Add(CreateCaptureDeviceStatus(device, isDefault));
                 device.Dispose();
             }
         }
@@ -379,24 +346,270 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         return deviceList;
     }
 
+    private DeviceStatusEventArgs CreateRenderDeviceStatus(MMDevice device, bool isDefault)
+    {
+        string devId = device.ID.ToLowerInvariant();
+        string friendlyName = device.FriendlyName;
+
+        // Determine DeviceType for the icon
+        DeviceType type = DeviceType.AudioOutput;
+        string lowerName = friendlyName.ToLowerInvariant();
+        if (lowerName.Contains("headset") || lowerName.Contains("headphone") || 
+            lowerName.Contains("earphone") || lowerName.Contains("buds") || 
+            lowerName.Contains("headphones"))
+        {
+            type = DeviceType.Headset;
+        }
+
+        var controls = new List<DeviceControl>();
+
+        if (isDefault)
+        {
+            var mute = new DeviceControl
+            {
+                ControlId = $"audio_mute_{devId}",
+                DisplayName = "Mute",
+                ControlType = "Toggle",
+                Value = IsMuted() ? 1 : 0,
+                OnControlChanged = (val) => SetMuted(val > 0.5)
+            };
+
+            var vol = new DeviceControl
+            {
+                ControlId = $"audio_volume_{devId}",
+                DisplayName = "Volume",
+                ControlType = "Slider",
+                Value = GetVolume() * 100,
+                OnControlChanged = (val) => SetVolume((float)(val / 100.0))
+            };
+
+            controls.Add(mute);
+            controls.Add(vol);
+        }
+        else
+        {
+            var activateAction = new DeviceControl
+            {
+                ControlId = $"audio_activate_{devId}",
+                DisplayName = "Activate",
+                ControlType = "Action",
+                Value = 0,
+                OnControlChanged = (val) =>
+                {
+                    if (val > 0.5)
+                    {
+                        SetDefaultDevice(devId);
+                    }
+                }
+            };
+            controls.Add(activateAction);
+        }
+
+        PowerStatus power = PowerStatus.Wired;
+        bool isOnline = device.State == DeviceState.Active;
+        int battery = -1;
+
+        bool isSteelSeries = lowerName.Contains("arctis") || lowerName.Contains("nova") || lowerName.Contains("steelseries");
+        if (isSteelSeries)
+        {
+            isOnline = _headsetOnline;
+            power = _headsetPower;
+            battery = _headsetBattery;
+        }
+        else if (lowerName.Contains("wireless") || lowerName.Contains("bluetooth"))
+        {
+            power = isOnline ? PowerStatus.Unknown : PowerStatus.PoweredOff;
+        }
+        else if (!isOnline)
+        {
+            power = type == DeviceType.Headset ? PowerStatus.PoweredOff : PowerStatus.Unknown;
+        }
+
+        return new DeviceStatusEventArgs(
+            deviceId: "audio_dev_" + devId,
+            displayName: friendlyName,
+            type: type,
+            batteryPercentage: battery,
+            power: power,
+            isOnline: isOnline,
+            controls: controls,
+            isDefault: isDefault
+        );
+    }
+
+    private DeviceStatusEventArgs CreateCaptureDeviceStatus(MMDevice device, bool isDefault)
+    {
+        string devId = device.ID.ToLowerInvariant();
+        string friendlyName = device.FriendlyName;
+        DeviceType type = DeviceType.Microphone;
+
+        var controls = new List<DeviceControl>();
+
+        if (isDefault)
+        {
+            string capturedDeviceId = device.ID;
+            
+            bool isMuted = false;
+            float volLevel = 1.0f;
+            try
+            {
+                isMuted = device.AudioEndpointVolume.Mute;
+                volLevel = device.AudioEndpointVolume.MasterVolumeLevelScalar;
+            }
+            catch { }
+
+            var mute = new DeviceControl
+            {
+                ControlId = $"audio_mute_{devId}",
+                DisplayName = "Mute",
+                ControlType = "Toggle",
+                Value = isMuted ? 1.0 : 0.0,
+                OnControlChanged = (val) =>
+                {
+                    try
+                    {
+                        if (_deviceEnumerator != null)
+                        {
+                            using (var dev = _deviceEnumerator.GetDevice(capturedDeviceId))
+                            {
+                                dev.AudioEndpointVolume.Mute = val > 0.5;
+                            }
+                        }
+                        TriggerCaptureStatusChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"AudioPlugin: Mute capture failed: {ex.Message}");
+                    }
+                }
+            };
+
+            var gain = new DeviceControl
+            {
+                ControlId = $"audio_gain_{devId}",
+                DisplayName = "Gain",
+                ControlType = "Slider",
+                Value = volLevel * 100,
+                OnControlChanged = (val) =>
+                {
+                    try
+                    {
+                        if (_deviceEnumerator != null)
+                        {
+                            using (var dev = _deviceEnumerator.GetDevice(capturedDeviceId))
+                            {
+                                dev.AudioEndpointVolume.MasterVolumeLevelScalar = (float)Math.Clamp(val / 100.0, 0.0, 1.0);
+                            }
+                        }
+                        TriggerCaptureStatusChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"AudioPlugin: Gain capture failed: {ex.Message}");
+                    }
+                }
+            };
+
+            controls.Add(mute);
+            controls.Add(gain);
+        }
+        else
+        {
+            var activateAction = new DeviceControl
+            {
+                ControlId = $"audio_activate_{devId}",
+                DisplayName = "Activate",
+                ControlType = "Action",
+                Value = 0,
+                OnControlChanged = (val) =>
+                {
+                    if (val > 0.5)
+                    {
+                        SetDefaultCaptureDevice(device.ID);
+                    }
+                }
+            };
+            controls.Add(activateAction);
+        }
+
+        PowerStatus power = PowerStatus.Wired;
+        bool isOnline = device.State == DeviceState.Active;
+        int battery = -1;
+
+        string lowerName = friendlyName.ToLowerInvariant();
+        bool isSteelSeries = lowerName.Contains("arctis") || lowerName.Contains("nova") || lowerName.Contains("steelseries");
+        if (isSteelSeries)
+        {
+            isOnline = _headsetOnline;
+            power = _headsetPower;
+            battery = _headsetBattery;
+        }
+        else if (lowerName.Contains("wireless") || lowerName.Contains("bluetooth"))
+        {
+            power = isOnline ? PowerStatus.Unknown : PowerStatus.PoweredOff;
+        }
+        else if (!isOnline)
+        {
+            power = PowerStatus.Unknown;
+        }
+
+        return new DeviceStatusEventArgs(
+            deviceId: "audio_dev_" + devId,
+            displayName: friendlyName,
+            type: type,
+            batteryPercentage: battery,
+            power: power,
+            isOnline: isOnline,
+            controls: controls,
+            isDefault: isDefault
+        );
+    }
+
+    private void TriggerRenderStatusChanged()
+    {
+        if (_defaultRenderDevice != null)
+        {
+            var args = CreateRenderDeviceStatus(_defaultRenderDevice, true);
+            DeviceStatusChanged?.Invoke(this, args);
+        }
+    }
+
+    private void TriggerCaptureStatusChanged()
+    {
+        if (_defaultCaptureDevice != null)
+        {
+            var args = CreateCaptureDeviceStatus(_defaultCaptureDevice, true);
+            DeviceStatusChanged?.Invoke(this, args);
+        }
+    }
+
     private void RefreshAudioEndpoint()
     {
+        MMDevice? newDevice = null;
         try
         {
             if (_deviceEnumerator == null) return;
             
-            var newDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+            newDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+            if (newDevice == null) return;
+
             if (_defaultRenderDevice == null || !string.Equals(_defaultRenderDevice.ID, newDevice.ID, StringComparison.OrdinalIgnoreCase))
             {
                 if (_volumeControl != null)
                 {
-                    _volumeControl.OnVolumeNotification -= OnVolumeChanged;
+                    if (_volumeNotificationDelegate != null)
+                    {
+                        _volumeControl.OnVolumeNotification -= _volumeNotificationDelegate;
+                    }
                     _volumeControl.Dispose();
+                    _volumeControl = null;
                 }
                 _defaultRenderDevice?.Dispose();
                 _defaultRenderDevice = newDevice;
+                newDevice = null; // Transfer ownership to prevent dispose in finally
                 _volumeControl = _defaultRenderDevice.AudioEndpointVolume;
-                _volumeControl.OnVolumeNotification += OnVolumeChanged;
+                _volumeNotificationDelegate = new AudioEndpointVolumeNotificationDelegate(OnVolumeChanged);
+                _volumeControl.OnVolumeNotification += _volumeNotificationDelegate;
                 System.Diagnostics.Debug.WriteLine($"RefreshAudioEndpoint: Switched to default device '{_defaultRenderDevice.FriendlyName}' (ID={_defaultRenderDevice.ID})");
             }
         }
@@ -404,8 +617,76 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         {
             System.Diagnostics.Debug.WriteLine($"RefreshAudioEndpoint Error: {ex.Message}");
         }
+        finally
+        {
+            newDevice?.Dispose();
+        }
     }
 
+    private void RefreshCaptureAudioEndpoint()
+    {
+        MMDevice? newDevice = null;
+        try
+        {
+            if (_deviceEnumerator == null) return;
+            
+            newDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+            if (newDevice == null) return;
+
+            if (_defaultCaptureDevice == null || !string.Equals(_defaultCaptureDevice.ID, newDevice.ID, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_captureVolumeControl != null)
+                {
+                    if (_captureVolumeNotificationDelegate != null)
+                    {
+                        _captureVolumeControl.OnVolumeNotification -= _captureVolumeNotificationDelegate;
+                    }
+                    _captureVolumeControl.Dispose();
+                    _captureVolumeControl = null;
+                }
+                _defaultCaptureDevice?.Dispose();
+                _defaultCaptureDevice = newDevice;
+                newDevice = null; // Transfer ownership to prevent dispose in finally
+                if (_defaultCaptureDevice != null)
+                {
+                    _captureVolumeControl = _defaultCaptureDevice.AudioEndpointVolume;
+                    _captureVolumeNotificationDelegate = new AudioEndpointVolumeNotificationDelegate(OnCaptureVolumeChanged);
+                    _captureVolumeControl.OnVolumeNotification += _captureVolumeNotificationDelegate;
+                }
+                System.Diagnostics.Debug.WriteLine($"RefreshCaptureAudioEndpoint: Switched to default capture device '{_defaultCaptureDevice?.FriendlyName}' (ID={_defaultCaptureDevice?.ID})");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"RefreshCaptureAudioEndpoint Error: {ex.Message}");
+        }
+        finally
+        {
+            newDevice?.Dispose();
+        }
+    }
+
+    private void OnCaptureVolumeChanged(AudioVolumeNotificationData data)
+    {
+        if (_dispatcher != null && !_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(new Action(() => OnCaptureVolumeChanged(data)));
+            return;
+        }
+
+        System.Diagnostics.Debug.WriteLine($"[AUDIO PLUGIN] OnCaptureVolumeChanged: Muted={data.Muted}, MasterVolume={data.MasterVolume}");
+        EventLogger.Log("SYSTEM", $"[AudioPlugin] OnCaptureVolumeChanged ({_defaultCaptureDevice?.FriendlyName ?? "Unknown"}): Muted={data.Muted}, Volume={(int)(data.MasterVolume * 100)}%", "#888888");
+        
+        // If the change was initiated by the user in our app recently, ignore it
+        if ((DateTime.UtcNow - _lastUserVolumeChangeTime).TotalMilliseconds < 500 ||
+            (DateTime.UtcNow - _lastUserMuteChangeTime).TotalMilliseconds < 500)
+        {
+            return;
+        }
+        
+        TriggerCaptureStatusChanged();
+    }
+ 
     private float GetVolume()
     {
         float vol = _volumeControl?.MasterVolumeLevelScalar ?? 0.0f;
@@ -419,6 +700,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
             System.Diagnostics.Debug.WriteLine($"SetVolume: Requesting volume level={level}");
             _lastUserVolumeChangeTime = DateTime.UtcNow;
             _volumeControl.MasterVolumeLevelScalar = Math.Clamp(level, 0.0f, 1.0f);
+            TriggerRenderStatusChanged();
         }
     }
 
@@ -435,12 +717,20 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
             System.Diagnostics.Debug.WriteLine($"SetMuted: Requesting mute={mute}");
             _lastUserMuteChangeTime = DateTime.UtcNow;
             _volumeControl.Mute = mute;
+            TriggerRenderStatusChanged();
         }
     }
 
     private void OnVolumeChanged(AudioVolumeNotificationData data)
     {
+        if (_dispatcher != null && !_dispatcher.CheckAccess())
+        {
+            _dispatcher.BeginInvoke(new Action(() => OnVolumeChanged(data)));
+            return;
+        }
+
         System.Diagnostics.Debug.WriteLine($"[AUDIO PLUGIN] OnVolumeChanged: Muted={data.Muted}, MasterVolume={data.MasterVolume}");
+        EventLogger.Log("SYSTEM", $"[AudioPlugin] OnVolumeChanged ({_defaultRenderDevice?.FriendlyName ?? "Unknown"}): Muted={data.Muted}, Volume={(int)(data.MasterVolume * 100)}%", "#888888");
         
         // If the change was initiated by the user in our app recently, ignore it
         if ((DateTime.UtcNow - _lastUserVolumeChangeTime).TotalMilliseconds < 500 ||
@@ -449,14 +739,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
             return;
         }
         
-        if (_dispatcher != null)
-        {
-            _dispatcher.BeginInvoke(new Action(() => TriggerStatusChanged()));
-        }
-        else
-        {
-            TriggerStatusChanged();
-        }
+        TriggerRenderStatusChanged();
     }
 
     private void SetDefaultDevice(string deviceId)
@@ -482,7 +765,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
 
-    public string? FindCaptureDeviceIdByName(string nameSubstring)
+    public virtual string? FindCaptureDeviceIdByName(string nameSubstring)
     {
         try
         {
@@ -498,7 +781,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
 
-    public string? GetDefaultCaptureDeviceId()
+    public virtual string? GetDefaultCaptureDeviceId()
     {
         try
         {
@@ -513,7 +796,7 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         }
     }
 
-    public void SetDefaultCaptureDevice(string deviceId)
+    public virtual void SetDefaultCaptureDevice(string deviceId)
     {
         try
         {
@@ -548,12 +831,14 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         {
             _dispatcher.BeginInvoke(new Action(() => {
                 RefreshAudioEndpoint();
+                RefreshCaptureAudioEndpoint();
                 TriggerStatusChanged();
             }));
         }
         else
         {
             RefreshAudioEndpoint();
+            RefreshCaptureAudioEndpoint();
             TriggerStatusChanged();
         }
     }
@@ -565,12 +850,14 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         {
             _dispatcher.BeginInvoke(new Action(() => {
                 RefreshAudioEndpoint();
+                RefreshCaptureAudioEndpoint();
                 TriggerStatusChanged();
             }));
         }
         else
         {
             RefreshAudioEndpoint();
+            RefreshCaptureAudioEndpoint();
             TriggerStatusChanged();
         }
     }
@@ -582,31 +869,47 @@ public class AudioPlugin : IDevicePlugin, IMMNotificationClient
         {
             _dispatcher.BeginInvoke(new Action(() => {
                 RefreshAudioEndpoint();
+                RefreshCaptureAudioEndpoint();
                 TriggerStatusChanged();
             }));
         }
         else
         {
             RefreshAudioEndpoint();
+            RefreshCaptureAudioEndpoint();
             TriggerStatusChanged();
         }
     }
 
     public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
     {
-        if (flow == DataFlow.Render && role == Role.Console)
+        if (role == Role.Console)
         {
             EventLogger.Log($"Audio Event: OnDefaultDeviceChanged - ID={defaultDeviceId}");
             if (_dispatcher != null)
             {
                 _dispatcher.BeginInvoke(new Action(() => {
-                    RefreshAudioEndpoint();
+                    if (flow == DataFlow.Render)
+                    {
+                        RefreshAudioEndpoint();
+                    }
+                    else if (flow == DataFlow.Capture)
+                    {
+                        RefreshCaptureAudioEndpoint();
+                    }
                     TriggerStatusChanged();
                 }));
             }
             else
             {
-                RefreshAudioEndpoint();
+                if (flow == DataFlow.Render)
+                {
+                    RefreshAudioEndpoint();
+                }
+                else if (flow == DataFlow.Capture)
+                {
+                    RefreshCaptureAudioEndpoint();
+                }
                 TriggerStatusChanged();
             }
         }

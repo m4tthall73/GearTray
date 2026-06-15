@@ -127,7 +127,7 @@
                                                                 <TextBlock Text="{Binding DisplayName}" Foreground="#A0A0A0" FontSize="11" VerticalAlignment="Center"/>
                                                                 
                                                                 <!-- Toggle Button View -->
-                                                                <CheckBox Grid.Column="1" IsChecked="{Binding Value, Converter={StaticResource DoubleToBoolConverter}}"
+                                                                <CheckBox Grid.Column="1" IsChecked="{Binding Value, Converter={StaticResource DoubleToBoolConverter}, Mode=OneWay}"
                                                                           Visibility="{Binding ControlType, Converter={StaticResource ControlTypeVisibilityConverter}, ConverterParameter=Toggle}"
                                                                           Checked="Control_Changed" Unchecked="Control_Changed" VerticalAlignment="Center"/>
                                                                 
