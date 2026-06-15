@@ -26,4 +26,4 @@ jobs:
       run: dotnet build GearTray.sln --configuration Release --no-restore
 
     - name: Run tests
-      run: dotnet test GearTray.sln --no-build --verbosity normal
+      run: dotnet test GearTray.sln --configuration Release --no-build --verbosity normal
