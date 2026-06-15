@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <Resource Include="logo_black.ico" />
+    <SplashScreen Include="SplashScreen.png" />
   </ItemGroup>
 
 </Project>
