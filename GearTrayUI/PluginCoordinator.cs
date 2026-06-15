@@ -34,13 +34,19 @@ public class AppConfig
     public Dictionary<string, int> DeviceBatteryThresholds { get; set; } = [];
 }
 
-public class PluginCoordinator
+public class PluginCoordinator(IEnumerable<IDevicePlugin> plugins)
 {
-    private readonly IEnumerable<IDevicePlugin> _plugins;
+    private readonly IEnumerable<IDevicePlugin> _plugins = plugins;
     private AppConfig _config = new();
-    private readonly Dictionary<string, DeviceStatusEventArgs> _allDevices = new();
-    private readonly Dictionary<string, string> _deviceLastUpdated = new();
+    private readonly Dictionary<string, DeviceStatusEventArgs> _allDevices = [];
+    private readonly Dictionary<string, string> _deviceLastUpdated = [];
     private readonly HashSet<string> _alertedDevices = [];
+
+    private static readonly JsonSerializerOptions _serializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
+    };
 
     public event Action<string, string>? OnRaiseNotification;
     public event Action? DeviceListChanged;
@@ -60,7 +66,7 @@ public class PluginCoordinator
         public int Bottom;
     }
 
-    private bool IsFullScreenAppActive()
+    private static bool IsFullScreenAppActive()
     {
         try
         {
@@ -240,11 +246,6 @@ public class PluginCoordinator
         SaveConfig(_config);
     }
 
-    public PluginCoordinator(IEnumerable<IDevicePlugin> plugins)
-    {
-        _plugins = plugins;
-    }
-
     public static string? ConfigPathOverride { get; set; }
 
     private static string GetConfigPath()
@@ -264,7 +265,7 @@ public class PluginCoordinator
         return Path.Combine(folder, "config.json");
     }
 
-    private AppConfig LoadConfig()
+    private static AppConfig LoadConfig()
     {
         try
         {
@@ -272,12 +273,11 @@ public class PluginCoordinator
             if (File.Exists(path))
             {
                 string json = File.ReadAllText(path);
-                var config = JsonSerializer.Deserialize<AppConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new AppConfig();
+                var config = JsonSerializer.Deserialize<AppConfig>(json, _serializerOptions) ?? new AppConfig();
                 // Deduplicate CachedDevices by DisplayName on load
-                config.CachedDevices = config.CachedDevices
+                config.CachedDevices = [..config.CachedDevices
                     .GroupBy(x => x.DisplayName)
-                    .Select(g => g.First())
-                    .ToList();
+                    .Select(g => g.First())];
                 return config;
             }
         }
@@ -288,12 +288,12 @@ public class PluginCoordinator
         return new AppConfig();
     }
 
-    private void SaveConfig(AppConfig config)
+    private static void SaveConfig(AppConfig config)
     {
         try
         {
             string path = GetConfigPath();
-            string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            string json = JsonSerializer.Serialize(config, _serializerOptions);
             File.WriteAllText(path, json);
         }
         catch (Exception ex)
@@ -532,7 +532,7 @@ public class PluginCoordinator
 
                         if (currentMic != null && currentMic.StartsWith("audio_dev_"))
                         {
-                            currentMic = currentMic.Substring("audio_dev_".Length);
+                            currentMic = currentMic["audio_dev_".Length..];
                         }
                     }
 
@@ -631,7 +631,7 @@ public class PluginCoordinator
 
                         if (targetMicId != null && targetMicId.StartsWith("audio_dev_"))
                         {
-                            targetMicId = targetMicId.Substring("audio_dev_".Length);
+                            targetMicId = targetMicId["audio_dev_".Length..];
                         }
                     }
 
