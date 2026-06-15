@@ -34,7 +34,7 @@ public class AppConfig
     public Dictionary<string, int> DeviceBatteryThresholds { get; set; } = [];
 }
 
-public class PluginCoordinator(IEnumerable<IDevicePlugin> plugins)
+public partial class PluginCoordinator(IEnumerable<IDevicePlugin> plugins)
 {
     private readonly IEnumerable<IDevicePlugin> _plugins = plugins;
     private AppConfig _config = new();
@@ -51,11 +51,12 @@ public class PluginCoordinator(IEnumerable<IDevicePlugin> plugins)
     public event Action<string, string>? OnRaiseNotification;
     public event Action? DeviceListChanged;
     
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
+    [LibraryImport("user32.dll")]
+    private static partial IntPtr GetForegroundWindow();
 
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
